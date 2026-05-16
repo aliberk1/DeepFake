@@ -53,11 +53,11 @@ class ConversationManager:
         
         try:
             if client:
-                prompt = f"System Persona: {self.active_persona}\n\nUser Message: {user_input}\n\nPlease respond according to the System Persona briefly."
+                prompt = f"System Persona: {self.active_persona}\n\nUser Message: {user_input}\n\nÖNEMLİ KURAL: Lütfen SADECE 1 (bir) cümlelik çok kısa bir cevap ver. Asla uzun cevap yazma. Kesinlikle tek cümle olsun."
                 
                 # Yeni kütüphaneye göre içerik üretme fonksiyonu
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-1.5-flash',
                     contents=prompt
                 )
                 
@@ -66,7 +66,7 @@ class ConversationManager:
                 ai_response = f"I don't have a Gemini API key yet. But you said: {user_input}"
         except Exception as e:
             print("Gemini API Error:", e)
-            ai_response = f"Simulated response (API limits/error): You said {user_input}"
+            ai_response = f"API Hatası (Kota dolmuş olabilir): {e}"
         
         # FR-3.4 & FR-3.5: Securely log the interaction
         self._secure_log(user_input, ai_response)

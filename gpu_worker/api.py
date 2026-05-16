@@ -20,7 +20,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Dict
+from typing import Dict, Optional
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,6 +32,22 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from modules.voice_cloning import VoiceCloner
+
+# === Meeting Simulation (FR-4) - Opsiyonel imports ===
+# Bunlar başarısız olursa /api/scenarios ve /api/chat-scenario endpoint'leri
+# çalışmaz ama mevcut sistem etkilenmez.
+try:
+    from modules import scenarios as _scenarios_module
+except Exception as _scenarios_err:
+    _scenarios_module = None
+    logging.getLogger(__name__).warning(f"scenarios modülü yüklenemedi: {_scenarios_err}")
+
+try:
+    from modules.conversation import ConversationManager as _ConversationManager
+except Exception as _conv_err:
+    _ConversationManager = None
+    logging.getLogger(__name__).warning(f"ConversationManager yüklenemedi: {_conv_err}")
+# === / Meeting Simulation ===
 
 # aiortc
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -57,6 +73,19 @@ try:
 except Exception as e:
     logger.error(f"Voice Cloner başlatılamadı: {e}")
     voice_cloner = None
+
+# === Meeting Simulation (FR-4) - ConversationManager singleton ===
+# Senaryo bazlı sohbet için kullanılır. Başlatılamazsa /api/chat-scenario
+# fallback yanıt verir; mevcut /api/chat etkilenmez.
+if _ConversationManager is not None:
+    try:
+        conversation_manager_scenario = _ConversationManager()
+    except Exception as e:
+        logger.warning(f"ConversationManager (senaryo) başlatılamadı: {e}")
+        conversation_manager_scenario = None
+else:
+    conversation_manager_scenario = None
+# === / Meeting Simulation ===
 
 # Outputs dizini oluştur
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
@@ -372,6 +401,168 @@ async def upload_voice(file: UploadFile = File(...)):
         # Geçici dosyayı temizle
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+# ===========================================================================
+# Meeting Simulation Endpoints (FR-4.1 - FR-4.6)
+# ===========================================================================
+# Bu blok mevcut endpoint'leri etkilemez. Tamamen additive (ek).
+# scenarios modülü veya ConversationManager yüklü değilse bile
+# endpoint'ler güvenli hata mesajı döner, sistem çökmez.
+# ---------------------------------------------------------------------------
+
+class ScenarioChatRequest(BaseModel):
+    """Senaryo bazlı sohbet isteği."""
+    message: str
+    scenario_id: str                          # FR-4.2..4.5: hangi senaryo
+    persona: str = "kayit_1"                  # ses modeli (TTS reference)
+    rate: float = 1.0
+    pitch: int = 0
+    emotion: str = "neutral"
+    participant_id: Optional[str] = None      # FR-4.6: çoklu katılımcı desteği
+
+
+@app.get("/api/scenarios")
+async def list_meeting_scenarios():
+    """
+    FR-4.2..4.5: Önceden tanımlı senaryoların listesini döndürür.
+    UI bu listeyi kullanarak senaryo seçim panelini doldurur.
+    """
+    if _scenarios_module is None:
+        return {"scenarios": [], "error": "scenarios modülü yüklenemedi."}
+    try:
+        return {"scenarios": _scenarios_module.list_scenarios()}
+    except Exception as e:
+        logger.error(f"list_scenarios hatası: {e}")
+        return {"scenarios": [], "error": str(e)}
+
+
+@app.post("/api/scenario/opening")
+async def scenario_opening(payload: dict):
+    """
+    Senaryo seçildiğinde AI'nin söyleyeceği açılış cümlesini ses olarak üretir.
+    Payload: { "scenario_id": "...", "persona": "kayit_1", ... }
+    """
+    scenario_id = payload.get("scenario_id", "")
+    if _scenarios_module is None:
+        return {"text": "", "audio_url": None, "error": "scenarios modülü yüklenemedi."}
+
+    scenario = _scenarios_module.get_scenario(scenario_id)
+    if not scenario:
+        return {"text": "", "audio_url": None, "error": f"Senaryo bulunamadı: {scenario_id}"}
+
+    opening_text = scenario["opening_line"]
+
+    if not voice_cloner:
+        return {"text": opening_text, "audio_url": None, "error": "Voice cloner aktif değil."}
+
+    try:
+        wav_filename = await voice_cloner.clone_voice(
+            target_text=opening_text,
+            persona=payload.get("persona", "kayit_1"),
+            rate=float(payload.get("rate", 1.0)),
+            pitch=int(payload.get("pitch", 0)),
+            emotion=payload.get("emotion", "neutral"),
+        )
+        if wav_filename:
+            audio_url = f"http://localhost:{os.getenv('GPU_WORKER_PORT', 8001)}/outputs/{wav_filename}"
+            return {"text": opening_text, "audio_url": audio_url, "scenario_id": scenario_id}
+        return {"text": opening_text, "audio_url": None, "error": "Ses sentezlenemedi."}
+    except Exception as e:
+        logger.error(f"scenario_opening hatası: {e}")
+        return {"text": opening_text, "audio_url": None, "error": str(e)}
+
+
+@app.post("/api/chat-scenario")
+async def chat_scenario(req: ScenarioChatRequest):
+    """
+    Senaryo bazlı sohbet (FR-4.2..4.5).
+
+    /api/chat'ten farkı: Gemini'ye verilen prompt, seçilen senaryonun
+    system_prompt'u ile başlar. Böylece AI o senaryonun karakterinde kalır.
+
+    FR-4.6 (çoklu katılımcı): participant_id geçilirse log'a yazılır;
+    her katılımcının farklı yüz+ses kombinasyonu olabilir, ama bu endpoint
+    sadece TEK katılımcının cevabını üretir (frontend sırayla çağırır).
+    """
+    if _scenarios_module is None:
+        return {"response": "", "audio_url": None, "error": "scenarios modülü yüklenemedi."}
+
+    scenario = _scenarios_module.get_scenario(req.scenario_id)
+    if not scenario:
+        return {"response": "", "audio_url": None, "error": f"Senaryo bulunamadı: {req.scenario_id}"}
+
+    logger.info(
+        f"[Scenario={req.scenario_id}] [Participant={req.participant_id or 'single'}] "
+        f"Mesaj: {req.message[:60]}..."
+    )
+
+    # 1) AI cevabı üret (ConversationManager varsa Gemini'yi kullan)
+    ai_response = None
+    if conversation_manager_scenario is not None:
+        try:
+            # Senaryo prompt'unu geçici olarak persona yap
+            original_persona = conversation_manager_scenario.active_persona
+            conversation_manager_scenario.active_persona = scenario["system_prompt"]
+            try:
+                ai_response = conversation_manager_scenario.get_response(req.message)
+            finally:
+                # Persona'yı her durumda eski haline getir (yan etki bırakma)
+                conversation_manager_scenario.active_persona = original_persona
+        except Exception as e:
+            logger.error(f"Gemini çağrısı başarısız: {e}")
+            ai_response = None
+
+    # 2) Fallback: Gemini yoksa veya hata olduysa
+    if not ai_response:
+        ai_response = f"({scenario['label']}) Şunu söylediniz: {req.message}"
+
+    # 3) Ses sentezi
+    if not voice_cloner:
+        return {
+            "response": ai_response,
+            "audio_url": None,
+            "scenario_id": req.scenario_id,
+            "participant_id": req.participant_id,
+            "error": "Voice cloner aktif değil.",
+        }
+
+    try:
+        wav_filename = await voice_cloner.clone_voice(
+            target_text=ai_response,
+            persona=req.persona,
+            rate=req.rate,
+            pitch=req.pitch,
+            emotion=req.emotion,
+        )
+        if wav_filename:
+            audio_url = f"http://localhost:{os.getenv('GPU_WORKER_PORT', 8001)}/outputs/{wav_filename}"
+            return {
+                "response": ai_response,
+                "audio_url": audio_url,
+                "scenario_id": req.scenario_id,
+                "participant_id": req.participant_id,
+            }
+        return {
+            "response": ai_response,
+            "audio_url": None,
+            "scenario_id": req.scenario_id,
+            "participant_id": req.participant_id,
+            "error": "Ses sentezlenemedi.",
+        }
+    except Exception as e:
+        logger.error(f"chat_scenario ses hatası: {e}")
+        return {
+            "response": ai_response,
+            "audio_url": None,
+            "scenario_id": req.scenario_id,
+            "participant_id": req.participant_id,
+            "error": str(e),
+        }
+
+# ===========================================================================
+# / Meeting Simulation Endpoints
+# ===========================================================================
 
 
 if __name__ == "__main__":

@@ -14,6 +14,10 @@ import { useWebRTC } from './hooks/useWebRTC';
 import { useMediaConstraints, QUALITY_PRESETS } from './hooks/useMediaConstraints';
 import { useAsyncModules } from './hooks/useAsyncModules';
 import VideoTile from './components/VideoTile';
+// === Meeting Simulation (FR-4) ===
+import MeetingScenarioPanel from './components/MeetingScenarioPanel';
+import ParticipantsPanel from './components/ParticipantsPanel';
+// === / Meeting Simulation ===
 
 // Mevcut yüz modelleri
 const FACE_MODELS = [
@@ -59,6 +63,13 @@ export default function App() {
     { type: 'system', text: 'System: Interaction initialized. Chat is secure.' }
   ]);
 
+  // === Meeting Simulation (FR-4) state ===
+  const [activeScenarioId, setActiveScenarioId] = useState(null);
+  const [activeScenario, setActiveScenario] = useState(null);
+  const [participants, setParticipants] = useState([]); // FR-4.6
+  const [isRoundRobinRunning, setIsRoundRobinRunning] = useState(false);
+  // === / Meeting Simulation ===
+
   // ── useMediaConstraints — Çözünürlük/FPS kısıtları ──
   const { preset, setPreset, constraints, applyToStream, profile } = useMediaConstraints();
 
@@ -100,31 +111,193 @@ export default function App() {
     if (localStream) applyToStream(localStream);
   };
 
+  // ===========================================================================
+  // Meeting Simulation handlers (FR-4)
+  // ===========================================================================
+
+  // Senaryo değiştiğinde: state güncelle + opening line'ı otomatik söyle (kullanıcı talebi)
+  const handleScenarioChange = async (scenarioId, scenarioObj) => {
+    setActiveScenarioId(scenarioId);
+    setActiveScenario(scenarioObj);
+
+    if (!scenarioId || !scenarioObj) {
+      setChatHistory(prev => [...prev, { type: 'system', text: '🎬 Senaryo: Serbest sohbet moduna geçildi.' }]);
+      return;
+    }
+
+    setChatHistory(prev => [...prev, {
+      type: 'system',
+      text: `🎬 Senaryo değiştirildi: ${scenarioObj.label}`,
+    }]);
+
+    // Opening line'ı seslendir
+    try {
+      const res = await fetch('http://localhost:8001/api/scenario/opening', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenario_id: scenarioId,
+          persona: voiceModel,
+          rate: speakingRate,
+          pitch: pitchAdjustment,
+          emotion: emotion,
+        }),
+      });
+      const data = await res.json();
+      if (data.text) {
+        setChatHistory(prev => [...prev, { type: 'ai', text: data.text }]);
+      }
+      if (data.audio_url) {
+        try {
+          const audio = new Audio(data.audio_url);
+          audio.play().catch(() => { });
+        } catch (_) { }
+      }
+    } catch (err) {
+      console.error('Opening line hatası:', err);
+      setChatHistory(prev => [...prev, {
+        type: 'system',
+        text: '⚠️ Senaryo açılışı seslendirilemedi (mevcut sohbet etkilenmez).',
+      }]);
+    }
+  };
+
+  // Senaryo modu aktifken sohbet gönderimi: /api/chat-scenario endpoint'ine yönlendir
+  const sendScenarioChat = async (message, participantOverride = null) => {
+    const personaToUse = participantOverride?.voiceModel ?? voiceModel;
+    const participantId = participantOverride?.id ?? null;
+    const participantName = participantOverride?.name ?? null;
+
+    try {
+      const response = await fetch('http://localhost:8001/api/chat-scenario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          scenario_id: activeScenarioId,
+          persona: personaToUse,
+          rate: speakingRate,
+          pitch: pitchAdjustment,
+          emotion: emotion,
+          participant_id: participantId,
+        }),
+      });
+      if (!response.ok) throw new Error('API yanıt vermedi');
+      const data = await response.json();
+
+      const prefix = participantName ? `[${participantName}] ` : '';
+      setChatHistory(prev => {
+        const cleaned = prev.filter(p => p.text !== 'AI düşünüyor ve ses sentezleniyor...');
+        return [...cleaned, { type: 'ai', text: prefix + (data.response || '') }];
+      });
+
+      if (data.audio_url) {
+        await new Promise((resolve) => {
+          try {
+            const audio = new Audio(data.audio_url);
+            audio.onended = resolve;
+            audio.onerror = resolve;
+            audio.play().catch(resolve);
+          } catch (_) { resolve(); }
+        });
+      }
+      return data;
+    } catch (err) {
+      console.error('sendScenarioChat hatası:', err);
+      setChatHistory(prev => {
+        const cleaned = prev.filter(p => p.text !== 'AI düşünüyor ve ses sentezleniyor...');
+        return [...cleaned, { type: 'system', text: 'Hata: Senaryo API bağlantısı kurulamadı.' }];
+      });
+      return null;
+    }
+  };
+
+  // FR-4.6: Katılımcı yönetimi
+  const handleAddParticipant = (participant) => {
+    setParticipants(prev => [...prev, participant]);
+  };
+  const handleRemoveParticipant = (id) => {
+    setParticipants(prev => prev.filter(p => p.id !== id));
+  };
+  const handleUpdateParticipant = (id, updates) => {
+    setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  // FR-4.6: Sırayla konuşturma (round-robin)
+  const handleRunRoundRobin = async () => {
+    if (!activeScenarioId) {
+      alert('Sırayla konuşturmak için önce bir senaryo seçin.');
+      return;
+    }
+    if (participants.length === 0) {
+      alert('Önce en az bir katılımcı ekleyin.');
+      return;
+    }
+    // Son kullanıcı mesajını bul
+    const lastUserMsg = [...chatHistory].reverse().find(m => m.type === 'user');
+    if (!lastUserMsg) {
+      alert('Önce sohbet kutusuna bir mesaj yazın, sonra sırayla konuşturun.');
+      return;
+    }
+
+    setIsRoundRobinRunning(true);
+    setChatHistory(prev => [...prev, {
+      type: 'system',
+      text: `🔄 Round-robin başladı (${participants.length} katılımcı)...`,
+    }]);
+
+    for (const participant of participants) {
+      setChatHistory(prev => [...prev, {
+        type: 'system',
+        text: `→ ${participant.name} konuşuyor...`,
+      }]);
+      // Yüz modelini değiştir (görsel olarak)
+      setFaceModel(participant.faceModel);
+      // Cevap üret + bekle
+      await sendScenarioChat(lastUserMsg.text, participant);
+    }
+
+    setChatHistory(prev => [...prev, { type: 'system', text: '✅ Round-robin tamamlandı.' }]);
+    setIsRoundRobinRunning(false);
+  };
+
+  // ===========================================================================
+  // / Meeting Simulation handlers
+  // ===========================================================================
+
   const handleSendChat = async () => {
     if (!chatInput.trim()) return;
     const msg = chatInput.trim();
     setChatHistory(prev => [...prev, { type: 'user', text: msg }]);
     setChatInput('');
-    
+
+    // === Meeting Simulation: Senaryo aktifse o akışa devret ===
+    if (activeScenarioId) {
+      setChatHistory(prev => [...prev, { type: 'system', text: 'AI düşünüyor ve ses sentezleniyor...' }]);
+      await sendScenarioChat(msg);
+      return;
+    }
+    // === / Meeting Simulation ===
+
     setChatHistory(prev => [...prev, { type: 'system', text: 'AI düşünüyor ve ses sentezleniyor...' }]);
 
     try {
       const response = await fetch('http://localhost:8001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: msg, 
+        body: JSON.stringify({
+          message: msg,
           persona: voiceModel,
-          rate: speakingRate, 
-          pitch: pitchAdjustment, 
-          emotion: emotion 
+          rate: speakingRate,
+          pitch: pitchAdjustment,
+          emotion: emotion
         })
       });
 
       if (!response.ok) throw new Error('API yanıt vermedi');
-      
+
       const data = await response.json();
-      
+
       setChatHistory(prev => {
         const newHistory = prev.filter(p => p.text !== 'AI düşünüyor ve ses sentezleniyor...');
         return [...newHistory, { type: 'ai', text: data.response }];
@@ -216,61 +389,81 @@ export default function App() {
         <div className="left-column" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* ── Video Stage ── */}
           <section className="video-stage glass-card">
-          <div className="video-stage__title">
-            📡 Canlı Video Akışı
-          </div>
+            <div className="video-stage__title">
+              📡 Canlı Video Akışı
+            </div>
 
-          <div className="video-grid">
-            <VideoTile
-              stream={localStream}
-              label={`Orijinal — ${profile.width}×${profile.height} @ ${profile.fps}fps`}
-              placeholder="📷"
-            />
-            <VideoTile
-              stream={remoteStream}
-              label="DeepFake (GPU)"
-              isDeepfake
-              placeholder="🎭"
-            />
-          </div>
+            <div className="video-grid">
+              <VideoTile
+                stream={localStream}
+                label={`Orijinal — ${profile.width}×${profile.height} @ ${profile.fps}fps`}
+                placeholder="📷"
+              />
+              <VideoTile
+                stream={remoteStream}
+                label={activeScenario ? `🎬 ${activeScenario.label} — AI Katılımcı` : "DeepFake (GPU)"}
+                isDeepfake
+                placeholder="🎭"
+              />
+            </div>
 
-          {/* Status Bar */}
-          <div className="status-bar" role="status" aria-live="polite">
-            <span className={`status-dot ${stateInfo.dotClass}`} />
-            <span>{stateInfo.text}</span>
-            {connectionState === 'connected' && (
-              <span style={{ marginLeft: 'auto', color: 'var(--clr-text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                {stats.fps | 0} fps · {stats.bitrate} kbps · {stats.rtt}ms RTT
-              </span>
-            )}
-          </div>
-        </section>
+            {/* Status Bar */}
+            <div className="status-bar" role="status" aria-live="polite">
+              <span className={`status-dot ${stateInfo.dotClass}`} />
+              <span>{stateInfo.text}</span>
+              {connectionState === 'connected' && (
+                <span style={{ marginLeft: 'auto', color: 'var(--clr-text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                  {stats.fps | 0} fps · {stats.bitrate} kbps · {stats.rtt}ms RTT
+                </span>
+              )}
+            </div>
+          </section>
 
-        {/* ── Chat Stage ── */}
-        <section className="chat-stage glass-card">
-          <div className="chat-stage__title">
-            💬 AI Sohbet & Senaryo
-          </div>
-          <div className="chat-history">
-            {chatHistory.map((msg, i) => (
-              <div key={i} className={`message ${msg.type}`}>{msg.text}</div>
-            ))}
-          </div>
-          <div className="chat-input-area">
-            <input 
-              type="text" 
-              placeholder="Mesajınızı yazın..." 
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSendChat()}
-            />
-            <button className="btn btn--primary" onClick={handleSendChat} style={{ width: 'auto', padding: '0 24px' }}>Gönder</button>
-          </div>
-        </section>
+          {/* ── Chat Stage ── */}
+          <section className="chat-stage glass-card">
+            <div className="chat-stage__title">
+              💬 AI Sohbet & Senaryo
+            </div>
+            <div className="chat-history">
+              {chatHistory.map((msg, i) => (
+                <div key={i} className={`message ${msg.type}`}>{msg.text}</div>
+              ))}
+            </div>
+            <div className="chat-input-area">
+              <input
+                type="text"
+                placeholder="Mesajınızı yazın..."
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSendChat()}
+              />
+              <button className="btn btn--primary" onClick={handleSendChat} style={{ width: 'auto', padding: '0 24px' }}>Gönder</button>
+            </div>
+          </section>
         </div>
 
         {/* ── Sidebar ── */}
         <aside className="sidebar">
+
+          {/* === Meeting Simulation: Senaryo Paneli (FR-4.2..4.5) === */}
+          <MeetingScenarioPanel
+            activeScenarioId={activeScenarioId}
+            onScenarioChange={handleScenarioChange}
+            onSamplePromptClick={(text) => setChatInput(text)}
+            disabled={isRoundRobinRunning}
+          />
+
+          {/* === Meeting Simulation: Çoklu Katılımcı (FR-4.6) === */}
+          <ParticipantsPanel
+            faceModels={FACE_MODELS}
+            voiceModels={customVoices}
+            participants={participants}
+            onAddParticipant={handleAddParticipant}
+            onRemoveParticipant={handleRemoveParticipant}
+            onUpdateParticipant={handleUpdateParticipant}
+            onRunRoundRobin={handleRunRoundRobin}
+            disabled={isRoundRobinRunning}
+          />
 
           {/* Yüz Modeli Seçimi */}
           <div className="glass-card">
@@ -296,11 +489,11 @@ export default function App() {
           {/* ── Ses Simülasyonu Ayarları ── */}
           <div className="glass-card">
             <p className="sidebar__section-title">Ses Simülasyonu</p>
-            
+
             <div className="input-group" style={{ marginBottom: 12 }}>
               <label htmlFor="voice-select">Ses Modeli</label>
-              <select 
-                id="voice-select" 
+              <select
+                id="voice-select"
                 className="select-input"
                 value={voiceModel}
                 onChange={e => setVoiceModel(e.target.value)}
@@ -314,9 +507,9 @@ export default function App() {
 
             <div className="slider-group">
               <label>Konuşma Hızı <span className="slider-val">{speakingRate}x</span></label>
-              <input 
-                type="range" 
-                min="0.5" max="2.0" step="0.1" 
+              <input
+                type="range"
+                min="0.5" max="2.0" step="0.1"
                 value={speakingRate}
                 onChange={e => setSpeakingRate(parseFloat(e.target.value))}
               />
@@ -324,9 +517,9 @@ export default function App() {
 
             <div className="slider-group">
               <label>Ses Tonu (Pitch) <span className="slider-val">{pitchAdjustment} st</span></label>
-              <input 
-                type="range" 
-                min="-12" max="12" step="1" 
+              <input
+                type="range"
+                min="-12" max="12" step="1"
                 value={pitchAdjustment}
                 onChange={e => setPitchAdjustment(parseInt(e.target.value))}
               />
@@ -334,8 +527,8 @@ export default function App() {
 
             <div className="input-group" style={{ marginBottom: 16 }}>
               <label htmlFor="emotion-select">Duygu Tonu</label>
-              <select 
-                id="emotion-select" 
+              <select
+                id="emotion-select"
                 className="select-input"
                 value={emotion}
                 onChange={e => setEmotion(e.target.value)}
