@@ -21,7 +21,7 @@ export const QUALITY_PRESETS = {
   hd:     { label: 'HD (720p)',      width: 1280, height: 720 },
 };
 
-const DEFAULT_PRESET = 'medium';
+const DEFAULT_PRESET = 'hd';
 
 /**
  * @returns {{ preset, setPreset, constraints, applyToStream }}
