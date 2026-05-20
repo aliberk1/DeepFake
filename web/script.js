@@ -25,6 +25,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendBtn = document.getElementById('send-btn');
     const chatHistory = document.getElementById('chat-history');
 
+    // Scenario Elements
+    const scenarioSelect = document.getElementById('scenario-select');
+    const loadingPanel = document.getElementById('scenario-loading');
+    const loadingText = document.getElementById('scenario-loading-text');
+    const loadingProgress = document.getElementById('scenario-progress');
+    const playPanel = document.getElementById('play-interview-panel');
+    const playBtn = document.getElementById('play-scenario-btn');
+    const subtitlesEl = document.getElementById('scenario-subtitles');
+
+    const SCENARIOS = {
+        comedy: [
+            { audio: '../outputs/voice_20260503_180542.mp3', text: 'Merhaba, komedi programına hoş geldiniz!' },
+            { audio: '../outputs/voice_20260503_180600.mp3', text: 'Bugün çok ilginç konularımız var, hazır mısınız?' },
+            { audio: '../outputs/voice_20260503_180620.mp3', text: 'Gülmekten karnınıza ağrılar girecek, garanti veriyorum!' }
+        ],
+        job_interview: [
+            { audio: '../outputs/voice_20260503_180648.mp3', text: 'Merhaba, iş görüşmesine hoş geldiniz. Lütfen oturun.' },
+            { audio: '../outputs/voice_20260503_180702.mp3', text: 'Bize biraz kendinizden ve önceki tecrübelerinizden bahseder misiniz?' },
+            { audio: '../outputs/voice_20260503_180713.mp3', text: 'Bu pozisyon için neden uygun olduğunuzu düşünüyorsunuz?' }
+        ],
+        debate: [
+            { audio: '../outputs/voice_20260503_180733.mp3', text: 'Münazaramıza başlıyoruz. Konumuz yapay zeka.' },
+            { audio: '../outputs/voice_20260503_180749.mp3', text: 'Yapay zekanın insanlığa faydalı olduğuna inananlar söz hakkı sizde.' },
+            { audio: '../outputs/voice_20260503_180802.mp3', text: 'Teşekkürler, şimdi karşıt görüşü dinleyelim.' }
+        ],
+        motivational: [
+            { audio: '../outputs/voice_20260503_180542.mp3', text: 'İçinizdeki potansiyeli asla küçümsemeyin!' },
+            { audio: '../outputs/voice_20260503_180600.mp3', text: 'Her yeni gün, yeni bir başlangıçtır.' },
+            { audio: '../outputs/voice_20260503_180620.mp3', text: 'Başarı, asla pes etmeyenlerin ödülüdür.' }
+        ]
+    };
+
     let isInteracting = false;
     let streamActive = false;
     let localStream = null;
@@ -65,6 +97,96 @@ document.addEventListener('DOMContentLoaded', () => {
     faceSelect.addEventListener('change', (e) => {
         aiNameLabel.textContent = e.target.options[e.target.selectedIndex].text;
     });
+
+    // Scenario Preloading & Playback Logic
+    let currentScenarioAudios = [];
+    let currentScenarioData = [];
+    let scenarioCurrentIndex = 0;
+
+    scenarioSelect?.addEventListener('change', (e) => {
+        loadScenario(e.target.value);
+    });
+
+    function loadScenario(scenarioKey) {
+        const data = SCENARIOS[scenarioKey];
+        if (!data) return;
+
+        currentScenarioData = data;
+        currentScenarioAudios = [];
+        scenarioCurrentIndex = 0;
+        
+        let loadedCount = 0;
+        const total = data.length;
+        
+        // UI Reset
+        if(playPanel) playPanel.style.display = 'none';
+        if(subtitlesEl) subtitlesEl.style.display = 'none';
+        if(loadingPanel) loadingPanel.style.display = 'block';
+        if(loadingText) loadingText.textContent = `Ses dosyaları yükleniyor (0/${total})...`;
+        if(loadingProgress) loadingProgress.style.width = '0%';
+        
+        data.forEach((item) => {
+            const audio = new Audio();
+            audio.preload = 'auto';
+            
+            const markLoaded = () => {
+                if (audio._isLoaded) return;
+                audio._isLoaded = true;
+                loadedCount++;
+                if(loadingText) loadingText.textContent = `Ses dosyaları yükleniyor (${loadedCount}/${total})...`;
+                if(loadingProgress) loadingProgress.style.width = `${(loadedCount / total) * 100}%`;
+                
+                if (loadedCount === total) {
+                    setTimeout(() => {
+                        if(loadingPanel) loadingPanel.style.display = 'none';
+                        if(playPanel) playPanel.style.display = 'block';
+                    }, 500); // short delay for 100% visual completion
+                }
+            };
+
+            // "oncanplaythrough" indicates the audio is fully ready
+            audio.addEventListener('canplaythrough', markLoaded);
+            audio.addEventListener('error', markLoaded); // Don't block UI if file is missing
+            
+            audio.src = item.audio;
+            audio.load();
+            currentScenarioAudios.push(audio);
+        });
+    }
+
+    playBtn?.addEventListener('click', () => {
+        if(playPanel) playPanel.style.display = 'none';
+        if(subtitlesEl) subtitlesEl.style.display = 'block';
+        scenarioCurrentIndex = 0;
+        playNextScenarioAudio();
+    });
+
+    function playNextScenarioAudio() {
+        if (scenarioCurrentIndex >= currentScenarioAudios.length) {
+            if(subtitlesEl) subtitlesEl.style.display = 'none';
+            addSystemMessage("Röportaj / Senaryo tamamlandı.");
+            return;
+        }
+
+        const audio = currentScenarioAudios[scenarioCurrentIndex];
+        const text = currentScenarioData[scenarioCurrentIndex].text;
+        
+        if(subtitlesEl) subtitlesEl.textContent = text;
+        addAiMessage(text);
+        
+        // Use "onended" for sequential flow
+        audio.addEventListener('ended', () => {
+            scenarioCurrentIndex++;
+            playNextScenarioAudio();
+        }, { once: true });
+        
+        audio.play().catch(e => {
+            console.error("Audio playback error:", e);
+            // Fallback: Skip to next if error occurs
+            scenarioCurrentIndex++;
+            playNextScenarioAudio();
+        });
+    }
 
     // Start/Stop Interaction
     startBtn.addEventListener('click', () => {

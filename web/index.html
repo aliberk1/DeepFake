@@ -31,6 +31,21 @@
                     <!-- Visible image for AI processed frames via WebSockets -->
                     <img id="output-video"
                         style="display:none; width:100%; height:100%; object-fit:cover; border-radius:12px;">
+                        
+                    <!-- NEW: Loading and Subtitles overlays -->
+                    <div id="scenario-loading" class="overlay-panel" style="display: none;">
+                        <p id="scenario-loading-text">Ses dosyaları yükleniyor (0/0)...</p>
+                        <div class="progress-bar-container">
+                            <div id="scenario-progress" class="progress-bar"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="play-interview-panel" class="overlay-panel" style="display: none;">
+                        <button id="play-scenario-btn" class="control-btn primary" style="font-size: 1.1rem; padding: 16px 32px;">▶ Röportajı Oynat</button>
+                    </div>
+
+                    <div id="scenario-subtitles" class="subtitles" style="display: none;"></div>
+
                     <!-- FR-2.11: Permanent visual watermark -->
                     <div class="watermark">AI Generated - Parody Mode</div>
                     <div class="participant-name" id="ai-name-label">AI Persona</div>

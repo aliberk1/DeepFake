@@ -342,6 +342,34 @@ async def chat_endpoint(req: ChatRequest):
         logger.error(f"Chat Endpoint Hatası: {e}")
         return {"response": ai_response, "audio_url": None, "error": str(e)}
 
+@app.post("/api/tts_only")
+async def tts_only_endpoint(req: ChatRequest):
+    """
+    Kullanıcıdan gelen metni doğrudan seslendirir. LLM veya chatbot mantığı içermez.
+    """
+    logger.info(f"TTS Only isteği alındı: {req.message[:50]}...")
+    
+    if not voice_cloner:
+        return {"audio_url": None, "error": "Voice cloner aktif değil."}
+
+    try:
+        wav_filename = await voice_cloner.clone_voice(
+            target_text=req.message,
+            persona=req.persona,
+            rate=req.rate,
+            pitch=req.pitch,
+            emotion=req.emotion
+        )
+        
+        if wav_filename:
+            audio_url = f"http://localhost:{os.getenv('GPU_WORKER_PORT', 8001)}/outputs/{wav_filename}"
+            return {"audio_url": audio_url, "text": req.message}
+        else:
+            return {"audio_url": None, "error": "Ses sentezlenemedi."}
+    except Exception as e:
+        logger.error(f"TTS Only Hatası: {e}")
+        return {"audio_url": None, "error": str(e)}
+
 
 @app.get("/api/voices")
 async def get_voices():
