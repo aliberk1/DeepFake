@@ -193,25 +193,68 @@ class AdaptiveFrameDropper:
 # DeepFake VideoTransformTrack (v2)
 # ---------------------------------------------------------------------------
 
+"""
+GPU Worker - WebRTC VideoTransformTrack (v5 - ULTIMATE ZERO LATENCY)
+"""
+import asyncio
+import fractions
+import logging
+import time
+from typing import Optional
+
+import av
+import cv2
+import numpy as np
+from aiortc import MediaStreamTrack
+
+logger = logging.getLogger(__name__)
+
+try:
+    from modules.face_swap import FaceSwapper
+except ModuleNotFoundError:
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from modules.face_swap import FaceSwapper
+
+_face_swapper: Optional[FaceSwapper] = None
+
+def get_face_swapper() -> FaceSwapper:
+    global _face_swapper
+    if _face_swapper is None:
+        logger.info("FaceSwapper başlatılıyor (GPU Worker)...")
+        _face_swapper = FaceSwapper()
+        _face_swapper.select_model("face1")
+        logger.info("FaceSwapper hazır.")
+    return _face_swapper
+
+def videoframe_to_ndarray(frame: av.VideoFrame) -> np.ndarray:
+    return frame.to_ndarray(format="bgr24")
+
+def ndarray_to_videoframe(img: np.ndarray, pts: int, time_base: fractions.Fraction) -> av.VideoFrame:
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    new_frame = av.VideoFrame.from_ndarray(img_rgb, format="rgb24")
+    new_frame.pts = pts
+    new_frame.time_base = time_base
+    return new_frame
+
+class FaceBBoxCache:
+    def __init__(self, detect_every_n: int = 3):
+        self._detect_every_n  = detect_every_n
+        self._frame_count     = 0
+        self._cached_faces    = None
+
+    def should_detect(self) -> bool:
+        self._frame_count += 1
+        return self._frame_count % self._detect_every_n == 0 or self._cached_faces is None
+
+    def update(self, faces):
+        self._cached_faces = faces
+
+    def get_cached(self):
+        return self._cached_faces
+
+
 class DeepFakeVideoTrack(MediaStreamTrack):
-    """
-    Gelen video akışını (tarayıcı kamerası) gerçek zamanlı olarak değiştirir.
-
-    v2 artırımları:
-      - FaceBBoxCache ile algılama yükü ~60-70% azaltıldı
-      - AdaptiveFrameDropper ile GPU aşırı yüklendiğinde kare atlanır
-      - İstatistik loglama (her 30 saniye)
-
-    aiortc mimarisi:
-        Tarayıcı  ──WebRTC──►  DeepFakeVideoTrack.recv()
-                                        │
-                                        ▼
-                             FaceSwapper.process_frame_raw_cached(img)
-                                        │
-                                        ▼
-        Tarayıcı  ◄──WebRTC──  işlenmiş VideoFrame
-    """
-
     kind = "video"
 
     def __init__(self, track: MediaStreamTrack, face_model: str = "face1"):
@@ -219,106 +262,106 @@ class DeepFakeVideoTrack(MediaStreamTrack):
         self._track      = track
         self._face_model = face_model
         self._swapper    = get_face_swapper()
-        self._last_processed: Optional[np.ndarray] = None
+        
+        self._bbox_cache = FaceBBoxCache(detect_every_n=3)
+        
+        # Arka plan işleme değişkenleri
+        self._last_processed_img: Optional[np.ndarray] = None
+        self._latest_raw_img: Optional[np.ndarray] = None
+        self._is_processing = False
+        self._loop = asyncio.get_event_loop()
 
-        # v2 optimizasyon bileşenleri
-        self._bbox_cache   = FaceBBoxCache(detect_every_n=3, bbox_expand_ratio=0.15)
-        self._frame_dropper = AdaptiveFrameDropper(target_fps=15.0, max_skip=4)
-
-        # İstatistik loglama
         self._stats_frame_count = 0
         self._stats_start_time  = time.monotonic()
 
-        # Aktif modeli ayarla
         self._swapper.select_model(face_model)
-        logger.info(f"DeepFakeVideoTrack v2 oluşturuldu. face_model={face_model}")
+        logger.info(f"DeepFakeVideoTrack v5 (Asenkron + Queue Hack) başlatıldı.")
 
     def set_face_model(self, model_id: str):
         if self._swapper.select_model(model_id):
             self._face_model = model_id
-            logger.info(f"Face model değiştirildi: {model_id}")
 
     async def recv(self) -> av.VideoFrame:
-        """
-        aiortc her yeni kare için bu metodu çağırır.
-        Gecikmeyi (latency) önlemek için AdaptiveFrameDropper kullanılarak
-        GPU aşırı yüklendiğinde bazı karelerin işlenmesi atlanır.
-        """
-        frame: av.VideoFrame = await self._track.recv()
+        # --- 1. AIORTC GİZLİ KUYRUK BOŞALTICI (ULTIMATE HACK) ---
+        # WebRTC'nin içinde biriken bayat kareleri anında çöpe at, en yenisini al.
+        frame = None
+        if hasattr(self._track, "_queue"):
+            while self._track._queue.qsize() > 0:
+                frame = self._track._queue.get_nowait()
+        
+        # Eğer kuyruk boşsa, yeni karenin gelmesini bekle
+        if frame is None:
+            frame = await self._track.recv()
+            
         self._stats_frame_count += 1
 
-        # Eğer adaptif dropper bu kareyi atlamamız gerektiğini söylüyorsa,
-        # gecikme (latency) oluşturmamak için GPU'yu es geç ve son kareyi ver.
-        if not self._frame_dropper.should_process():
-            if self._last_processed is not None:
-                return ndarray_to_videoframe(self._last_processed, frame.pts, frame.time_base)
-            return frame
-
+        # --- 2. ASENKRON İŞLEME (Ana döngüyü asla kilitleme) ---
         img = videoframe_to_ndarray(frame)
-        processed = await asyncio.get_event_loop().run_in_executor(
-            None,
-            self._process_with_cache,
-            img,
-        )
-        self._last_processed = processed
+        self._latest_raw_img = img
 
-        # Periyodik istatistik logu (her ~30sn)
+        if not self._is_processing:
+            self._is_processing = True
+            asyncio.create_task(self._start_background_processing())
+
+        # İstatistik
         elapsed = time.monotonic() - self._stats_start_time
         if elapsed >= 30.0:
-            self._log_stats(elapsed)
+            avg_fps = self._stats_frame_count / elapsed
+            # DİKKAT: Yeni log formatı bu şekilde!
+            logger.info(f"[Stats] CANLI FPS: {avg_fps:.1f} | Model: {self._face_model} | Kuyruk: Sıfır Gecikme")
             self._stats_frame_count = 0
             self._stats_start_time = time.monotonic()
 
-        return ndarray_to_videoframe(processed, frame.pts, frame.time_base)
+        # --- 3. ANINDA YANIT (Gecikmesiz) ---
+        if self._last_processed_img is not None:
+            return ndarray_to_videoframe(self._last_processed_img, frame.pts, frame.time_base)
+        
+        return frame
 
-    def _process_with_cache(self, img: np.ndarray) -> np.ndarray:
-        """
-        Face-caching + adaptif frame-dropping ile optimize edilmiş işleme.
-        FaceBBoxCache sayesinde her karede detection çalıştırmaz.
-        """
-        start = time.perf_counter()
+    async def _start_background_processing(self):
+        try:
+            img_to_process = self._latest_raw_img
+            if img_to_process is not None:
+                processed = await self._loop.run_in_executor(
+                    None,
+                    self._process_frame_core,
+                    img_to_process,
+                )
+                if processed is not None:
+                    self._last_processed_img = processed
+        except Exception as e:
+            logger.error(f"Arka plan işleme hatası: {e}")
+        finally:
+            self._is_processing = False
 
+    def _process_frame_core(self, img: np.ndarray) -> np.ndarray:
         try:
             if self._swapper.app is None or self._swapper.swapper is None or self._swapper.source_face is None:
                 return img
 
-            # ── Face Detection (cached) ──
+            # GPU Şişmesini Önleyen 720p Küçültücü
+            h, w = img.shape[:2]
+            if w > 1280:
+                scale = 1280.0 / w
+                img = cv2.resize(img, (1280, int(h * scale)))
+
             if self._bbox_cache.should_detect():
-                # Tam detection çalıştır
                 faces = self._swapper.app.get(img)
                 self._bbox_cache.update(faces)
             else:
-                # Cache'ten al — detection atla
                 faces = self._bbox_cache.get_cached()
 
-            # ── Face Swap ──
             if faces and len(faces) > 0:
                 img = self._swapper.swapper.get(
                     img, faces[0], self._swapper.source_face, paste_back=True
                 )
 
-            # ── Filigran ──
             cv2.putText(
                 img, "AI GENERATED - DEEPFAKE", (15, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2,
             )
+            return img
 
         except Exception as e:
-            logger.error(f"Frame işleme hatası: {e}")
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        self._frame_dropper.record_processing_time(elapsed_ms)
-
-        return img
-
-    def _log_stats(self, elapsed: float):
-        """Periyodik performans logu."""
-        avg_fps = self._stats_frame_count / elapsed if elapsed > 0 else 0
-        cache_stats = self._bbox_cache.get_stats()
-        logger.info(
-            f"[Stats] FPS: {avg_fps:.1f} | "
-            f"Skip: {self._frame_dropper.skip_factor}x | "
-            f"Avg process: {self._frame_dropper.avg_processing_ms:.1f}ms | "
-            f"Cache hit: {cache_stats['hit_ratio']} | "
-            f"face_model: {self._face_model}"
-        )
+            logger.error(f"Core işlemci hatası: {e}")
+            return img
