@@ -14,15 +14,28 @@ Dışarıya açma (ayrı terminalde):
     -- veya --
     cloudflared tunnel --url http://localhost:8001
 """
+import sys
+import os
 
+# 1. ÖNCE ADRESİ TARİF EDİYORUZ (Çok Önemli: En üstte olmalı!)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 2. SONRA STANDART KÜTÜPHANELERİ ÇAĞIRIYORUZ
+import subprocess
+import shutil
 import asyncio
 import logging
-import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
-import sys
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import FileResponse
+
+# 3. VE EN SON KENDİ MODÜLÜMÜZÜ ÇAĞIRIYORUZ (Artık adres bilindiği için hata vermeyecek)
+from modules.voice_conversion import convert_voice_rvc
+
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
@@ -182,6 +195,62 @@ async def health():
         "gpu": gpu_name,
         "active_connections": len(peer_connections),
     }
+@app.post("/api/process-video-voice")
+async def process_video_voice(
+    video: UploadFile = File(...),
+    target_voice: str = Form(...)
+):
+    """
+    React'ten gelen kayıtlı videoyu alır, sesini FFmpeg ile ayırır,
+    RVC modülü ile sesi değiştirir ve tekrar birleştirip geri yollar.
+    """
+    # 1. İşlem Klasörünü Hazırla (Ortalığı kirletmemek için)
+    temp_dir = "temp_processing"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    input_video_path = os.path.join(temp_dir, "input_video.webm")
+    original_audio_path = os.path.join(temp_dir, "original_audio.wav")
+    new_audio_path = os.path.join(temp_dir, "new_audio.wav")
+    final_video_path = os.path.join(temp_dir, "final_video.mp4")
+
+    try:
+        # 2. React'ten gelen videoyu diske yaz
+        with open(input_video_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        # 3. FFmpeg ile videonun içindeki sesi cımbızla çek
+        # (Eğer videoda ses yoksa hata vermemesi için basit bir try-except koyulabilir ama React'ten sesli geleceğinden eminiz)
+        subprocess.run([
+            ffmpeg_exe, "-y", "-i", input_video_path,
+            "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+            original_audio_path
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # 4. İzole Ses Dönüşüm Modülünü (RVC) Çalıştır
+        success = await convert_voice_rvc(original_audio_path, target_voice, new_audio_path)
+        if not success:
+            return {"error": "Yapay zeka ses dönüşümünde bir hata oluştu."}
+
+        # 5. Yeni sesi ve eski videoyu birleştir (VP8'i H.264'e çevirerek standart MP4 yapıyoruz)
+        subprocess.run([
+            ffmpeg_exe, "-y", "-i", input_video_path, "-i", new_audio_path,
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "192k",
+            final_video_path
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # 6. Oluşan kusursuz deepfake videosunu React'e indirilebilir olarak yolla
+        return FileResponse(
+            path=final_video_path, 
+            media_type="video/mp4", 
+            filename=f"deepfake_{target_voice}.mp4"
+        )
+
+    except Exception as e:
+        return {"error": f"Video işleme boru hattında hata: {str(e)}"}
 
 
 @app.post("/webrtc/offer")

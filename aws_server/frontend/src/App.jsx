@@ -13,7 +13,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useWebRTC } from './hooks/useWebRTC';
 import { useMediaConstraints, QUALITY_PRESETS } from './hooks/useMediaConstraints';
 import VideoTile from './components/VideoTile';
-
+import VoiceSwapRecorder from './components/VoiceSwapRecorder';
 
 // Mevcut yüz modelleri
 const FACE_MODELS = [
@@ -554,6 +554,13 @@ export default function App() {
                 placeholder="🎭"
               />
             </div>
+
+            {/* Yüz & Ses Kayıt Stüdyosu */}
+            {remoteStream && (
+              <div style={{ marginTop: '16px' }}>
+                <VoiceSwapRecorder remoteStream={remoteStream} targetVoice={voiceModel} />
+              </div>
+            )}
 
             {/* Status Bar */}
             <div className="status-bar" role="status" aria-live="polite">

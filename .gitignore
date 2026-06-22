@@ -21,3 +21,4 @@ venv/
 *.zip
 *.exe
 pip_out*.txt
+data/source_faces/hakan_hoca.jpg
