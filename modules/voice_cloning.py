@@ -31,8 +31,14 @@ class VoiceCloner:
         reference_path = os.path.join(self.reference_dir, f"{persona}.wav")
         
         if not os.path.exists(reference_path):
-            print(f"Uyarı: {reference_path} bulunamadı! İşlem iptal ediliyor.")
-            return None
+            print(f"Uyarı: {reference_path} bulunamadı! Fallback olarak dizindeki ilk wav dosyası kullanılacak.")
+            fallback_wavs = [f for f in os.listdir(self.reference_dir) if f.endswith(".wav")]
+            if fallback_wavs:
+                reference_path = os.path.join(self.reference_dir, fallback_wavs[0])
+                print(f"Fallback uygulandı: {reference_path}")
+            else:
+                print("Hata: Fallback için hiçbir .wav dosyası bulunamadı! İşlem iptal ediliyor.")
+                return None
 
         output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "outputs")
         os.makedirs(output_dir, exist_ok=True)

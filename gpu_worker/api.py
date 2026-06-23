@@ -442,19 +442,29 @@ async def tts_only_endpoint(req: ChatRequest):
 
 @app.get("/api/voices")
 async def get_voices():
-    """Mevcut tüm ses kayıtlarını (Kayıt 1, Kayıt 2...) liste olarak döndürür."""
-    ref_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tts_service", "references")
-    if not os.path.exists(ref_dir):
-        return {"voices": []}
+    """Mevcut tüm ses kayıtlarını (TTS .wav ve RVC .pth) liste olarak döndürür."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ref_dir = os.path.join(base_dir, "tts_service", "references")
+    rvc_dir = os.path.join(base_dir, "modules", "rvc_models")
     
-    voices = []
-    for file in os.listdir(ref_dir):
-        if file.endswith(".wav"):
-            voices.append(file.replace(".wav", ""))
+    voices = set()
     
+    # TTS referanslarını (.wav) ekle
+    if os.path.exists(ref_dir):
+        for file in os.listdir(ref_dir):
+            if file.endswith(".wav"):
+                voices.add(file.replace(".wav", ""))
+                
+    # RVC modellerini (.pth) ekle
+    if os.path.exists(rvc_dir):
+        for file in os.listdir(rvc_dir):
+            if file.endswith(".pth"):
+                voices.add(file.replace(".pth", ""))
+    
+    voices_list = list(voices)
     # Sıralı gelmesi için isme göre sıralayalım
-    voices.sort(key=lambda x: int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else 0)
-    return {"voices": voices}
+    voices_list.sort(key=lambda x: int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else str(x))
+    return {"voices": voices_list}
 
 
 @app.post("/api/upload-voice")
