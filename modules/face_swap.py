@@ -38,7 +38,8 @@ class FaceSwapper:
             "face5": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'source_faces', 'face5.jpeg'),
             "face6": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'source_faces', 'face6.jpeg'),
             "face7": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'source_faces', 'face7.jpeg'),
-            "face8": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'source_faces', 'face8.jpeg')
+            "face8": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'source_faces', 'face8.jpeg'),
+            "face9": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'source_faces', 'face9.jpeg')
         }
         self.active_model_path = None
         self.source_face = None

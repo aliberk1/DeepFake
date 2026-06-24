@@ -18,11 +18,12 @@ import VoiceSwapRecorder from './components/VoiceSwapRecorder';
 // Mevcut yüz modelleri
 const FACE_MODELS = [
   { id: 'face1', label: 'Brad Pitt', emoji: '🧑' },
-  { id: 'face2', label: 'Kıvanç Tatlıtuğ', emoji: '👩' },
+  { id: 'face2', label: 'Kıvanç Tatlıtuğ', emoji: '👱' },
   { id: 'face3', label: 'Azra', emoji: '🧔' },
-  { id: 'face4', label: 'Hande Erçel', emoji: '👱' },
+  { id: 'face4', label: 'Hülya Avşar', emoji: '👩' },
   { id: 'face5', label: 'Burak Özçivit', emoji: '🧓' },
   { id: 'face6', label: 'Aras Bulut İynemli', emoji: '👨‍🦰' },
+  { id: 'face9', label: 'Fatih Terim', emoji: '👨' },
 ];
 
 // Bağlantı durumu -> Türkçe metin + dot class
@@ -42,96 +43,38 @@ const SIGNALING_URL = import.meta.env.VITE_SIGNALING_WS_URL ?? 'ws://localhost:8
 
 const AUTO_SCENARIOS = {
 
-  "is_gorusmesi": [
-
+  "futbol_roportaji": [
     [
-
-      { speaker: 1, text: "Merhaba, öncelikle hoş geldiniz, özgeçmişinizi inceledik ve özellikle son projenizdeki mimari kararlarınız dikkatimizi çekti, bize bu süreçten bahsedebilir misiniz?" },
-
-      { speaker: 2, text: "Merhaba, elbette, son projemizde mikroservis mimarisine geçiş yaptık, amacımız, artan kullanıcı trafiğini daha modüler ve ölçeklenebilir bir yapıyla karşılamaktı," },
-
-      { speaker: 1, text: "Çok mantıklı bir yaklaşım, peki, bu geçiş sırasında karşılaştığınız en büyük teknik zorluk neydi ve bunu nasıl aştınız?" },
-
-      { speaker: 2, text: "En büyük zorluk servisler arası veri tutarlılığını sağlamaktı, bunu çözmek için 'olay-tabanlı' bir yaklaşım benimsedik ve asenkron iletişim altyapısını güçlendirdik," },
-
-      { speaker: 1, text: "Harika, kriz anlarında analitik yaklaşımınız gerçekten etkileyici, teşekkür ederiz, çok verimli bir görüşme oldu," }
-
+      { speaker: 1, text: "Hocam hoş geldiniz. Şimdi çok net soruyorum; futbol sadece skor mu, yoksa sahada bambaşka bir hikâye mi var?" },
+      { speaker: 2, text: "Futbol sadece skor değildir. Karakterdir, mücadeledir, inançtır. Kaybettiğinde değil, vazgeçtiğinde yenilirsin." },
+      { speaker: 1, text: "Bak bu çok iyi hocam. Yani tabelaya bakıp hüküm vermek kolay ama asıl mesele takımın o anda verdiği reaksiyon diyorsunuz." },
+      { speaker: 2, text: "Aynen öyle. Büyük takım baskıdan kaçmaz. Yel kayadan ancak toz alır. Sahaya çıkarsın, formanın hakkını verirsin." },
+      { speaker: 1, text: "Hocam inanılmaz net anlattınız. Bu sadece futbol değil, resmen hayat dersi." }
     ],
-
     [
-
-      { speaker: 1, text: "Hoş geldiniz, şirketimizde liderlik yeteneklerine çok önem veriyoruz, daha önceki ekibinizde takım içi çatışmaları nasıl yönetiyordunuz?" },
-
-      { speaker: 2, text: "Teşekkür ederim, benim için takım içi iletişim her şeyin temelidir, çatışma anlarında tarafları birebir dinler, sorunun kişisel değil işle ilgili kök nedenini bulmaya odaklanırım," },
-
-      { speaker: 1, text: "Kesinlikle doğru bir yaklaşım, peki, performansında ciddi düşüş olan bir ekip üyesiyle nasıl bir geri bildirim süreci izlersiniz?" },
-
-      { speaker: 2, text: "Performans düşüşünün arkasında motivasyon eksikliği mi yoksa teknik bir yetersizlik mi olduğunu anlamaya çalışırım, yargılamak yerine destekleyici bir eğitim planı çizerim," },
-
-      { speaker: 1, text: "Çok profesyonel, ekibimize böyle yapıcı bir vizyon katmanız bizi çok mutlu eder," }
-
-    ],
-
-    [
-
-      { speaker: 1, text: "Merhaba, veri odaklı pazarlama stratejileri konusunda oldukça iddialı olduğunuzu görüyoruz, bize biraz veri analizini kampanyalarınıza nasıl entegre ettiğinizi anlatır mısınız?" },
-
-      { speaker: 2, text: "Merhabalar, öncelikle hedef kitlemizin dijital ayak izlerini analiz etmek için ileri düzey analitik araçları kullanıyoruz, A/B testleri sayesinde hangi mesajın daha çok dönüşüm getirdiğini ölçüyoruz," },
-
-      { speaker: 1, text: "Peki, bütçenin kısıtlı olduğu bir durumda hangi metrikleri önceliklendirirsiniz?" },
-
-      { speaker: 2, text: "Kesinlikle Müşteri Edinme Maliyeti (CAC) ve Yaşam Boyu Değer (LTV) metriklerine odaklanırım, düşük bütçeyle en sadık ve uzun vadeli müşteriyi getiren kanallara yatırım yapmak hayat kurtarır," },
-
-      { speaker: 1, text: "Nokta atışı bir cevap, sektörel bilginiz ve stratejik düşünme yeteneğiniz tam aradığımız gibi," }
-
+      { speaker: 1, text: "Hocam şimdi tribün dolu, sosyal medya kaynıyor, herkes konuşuyor. Böyle bir ortamda oyuncuya ne söylersiniz?" },
+      { speaker: 2, text: "Ben oyuncuma şunu söylerim: Korkmayacaksın. Biz bitti demeden bitmez. Son düdüğe kadar savaşacaksın." },
+      { speaker: 1, text: "İşte bu hocam! Tam sizin cümleniz. İnsan bunu duyunca maça çıkmak istiyor yani." },
+      { speaker: 2, text: "Sahada bahane olmaz. Başarı oyuncularındır, sorumluluk benimdir. Ama kimse mücadeleden vazgeçemez." },
+      { speaker: 1, text: "Hocam ağzınıza sağlık. Bugün futbolu, mücadeleyi ve liderliği konuştuk. Bak söylüyorum, bu röportaj çok konuşulur." }
     ]
-
   ],
 
-  "komedi": [
-
+  "sinema_roportaji": [
     [
-
-      { speaker: 1, text: "Geçen gün yolda yürüyorum, bir baktım yerde rulo halinde 100 lira var, dedim ki bugün benim şanslı günüm!" },
-
-      { speaker: 2, text: "Eee, ne yaptın? Hemen eğilip aldın mı bari? Ben olsam affetmezdim," },
-
-      { speaker: 1, text: "Eğildim tam alacağım, bir baktım banknotun üzerinde 'Bunu alırsan kameraya el salla' yazıyor! Bari 200 koysaydınız be kardeşim!" },
-
-      { speaker: 2, text: "Hahaha! Harika bir tuzağa düşmüşsün, sonra ne oldu peki, el salladın mı?" },
-
-      { speaker: 1, text: "Mecbur salladım, sonra otobüse bindim, şoför bana bir bakış attı, adam sanki bileti ben değil de o basacakmış gibi dertliydi," }
-
+      { speaker: 1, text: "Haluk, hoş geldin. Şimdi sana şunu sormak isterim; sinema dediğimiz şey yalnızca kameranın karşısına geçmek midir, yoksa insanın sesini, nefesini, susuşunu bir karaktere emanet etmesi midir?" },
+      { speaker: 2, text: "Sinema insanı anlamaya çalışmaktır. Bazen uzun bir cümleyle değil, küçük bir bakışla anlatırsın her şeyi. Oyuncu rol yapmaz; karakterin hakikatini arar." },
+      { speaker: 1, text: "Çok doğru. Ben hep şuna inanırım; ses yalnızca duyulan bir şey değildir, karakterin ruhudur. Bir kelimeyi yanlış yere koyarsan, seyirci onu duyar. Bir nefesi doğru verirsen, karakter yaşar." },
+      { speaker: 2, text: "Aynen öyle. Agâh Beyoğlu’nu oynarken de mesele sadece yaşlı bir adamı göstermek değildi. Hafızayı, vicdanı, yalnızlığı ve insanın içindeki karanlığı taşımaktı." },
+      { speaker: 1, text: "İşte oyunculuk burada başlıyor. Sahne de kamera da mikrofon da aynı şeyi ister: hakikat. Seyirciye bağırmadan ulaşabilmek, bazen en büyük ustalıktır." }
     ],
-
     [
-
-      { speaker: 1, text: "Dün akşam dedeme yeni aldığı akıllı telefonu kullanmayı öğreteyim dedim, dehşet bir deneyimdi," },
-
-      { speaker: 2, text: "Aman diyeyim, büyük cesaret! Ne oldu, internete girebildi mi bari?" },
-
-      { speaker: 1, text: "İnternete girmek mi? Adam Google'a 'Nasılsın Google, torunum geldi çay içiyoruz' yazıp enter'a basmış, bekliyor ki Google cevap versin," },
-
-      { speaker: 2, text: "İnanılmaz! Peki arama sonuçlarında ne çıkmış?" },
-
-      { speaker: 1, text: "Sonuçlarda çay tarifleri çıkınca dedem sinirlendi, 'Soru soruyoruz terbiyesiz makine bize yemek tarifi veriyor' deyip telefonu masaya bıraktı," }
-
-    ],
-
-    [
-
-      { speaker: 1, text: "Dün restoranda başıma ne geldi inanamazsın, garsona 'Bana bir suflör getirir misin' demişim yanlışlıkla," },
-
-      { speaker: 2, text: "Sufle yerine suflör mü? Garson ne yaptı peki, tiyatrocu mu çağırdı mutfaktan?" },
-
-      { speaker: 1, text: "Adam hiç bozuntuya vermedi, 'Maalesef efendim, suflörümüz izinde ama isterseniz sufle verebilirim' dedi, yerin dibine girdim," },
-
-      { speaker: 2, text: "Ahaha! Çok profesyonelmiş, ben olsam gülmekten siparişi alamazdım," },
-
-      { speaker: 1, text: "İşin kötüsü o heyecanla 'Yok kalsın, ben sufleyi kendim fısıldarım' dedim, sonra hesabı ödeyip kaçtım resmen," }
-
+      { speaker: 1, text: "Haluk, tiyatrodan gelen oyuncuların sinemada başka bir ağırlığı oluyor. Kış Uykusu gibi bir filmde uzun sessizlikler, derin bakışlar, ağır diyaloglar var. Böyle bir oyunda en zor şey nedir?" },
+      { speaker: 2, text: "En zor şey abartmamaktır. Kamera yalanı çok çabuk görür. Tiyatroda bedenin büyür, sinemada ruhun görünür. O yüzden ölçü, disiplin ve içtenlik gerekir." },
+      { speaker: 1, text: "Evet, ölçü çok mühim. Çünkü seslendirmede de böyledir; fazla bastırırsan duygu ölür, eksik bırakırsan karakter eksik kalır. Oyuncu kelimenin hakkını verecek ama kelimenin önüne geçmeyecek." },
+      { speaker: 2, text: "Oyunculuk biraz da insanın kendisiyle kavgasıdır. Her karakter sana başka bir ayna tutar. Ödül güzel şeydir ama asıl mesele seyircinin o aynada kendini görmesidir." },
+      { speaker: 1, text: "Ağzına sağlık Haluk. Bugün sinemayı, sesi, susmayı ve oyunculuğun vicdanını konuştuk. Galiba mesele şu: iyi oyuncu görünmek için değil, karakteri görünür kılmak için vardır." }
     ]
-
   ],
 
   "felsefe": [
@@ -257,13 +200,13 @@ export default function App() {
 
   // Otomatik Röportaj State'leri
   const [scenarioIndexes, setScenarioIndexes] = useState({
-    "is_gorusmesi": 0,
-    "komedi": 0,
+    "futbol_roportaji": 0,
+    "sinema_roportaji": 0,
     "felsefe": 0,
     "acik_oturum": 0
   });
   const [scenarioVoices, setScenarioVoices] = useState({});
-  const [autoScenario, setAutoScenario] = useState('is_gorusmesi');
+  const [autoScenario, setAutoScenario] = useState('futbol_roportaji');
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const [preloadState, setPreloadState] = useState({ isPreloading: false, current: 0, total: 0 });
 
@@ -789,8 +732,8 @@ export default function App() {
             <div className="input-group" style={{ marginBottom: 15 }}>
               <label>Konu (Senaryo)</label>
               <select className="select-input" value={autoScenario} onChange={e => setAutoScenario(e.target.value)} disabled={isAutoPlaying}>
-                <option value="is_gorusmesi">💼 İş Görüşmesi (2 Kişi)</option>
-                <option value="komedi">🎭 Komedi / Şaka (2 Kişi)</option>
+                <option value="futbol_roportaji">⚽ Futbol Röportajı (2 Kişi)</option>
+                <option value="sinema_roportaji">🎬 Sinema Röportajı (2 Kişi)</option>
                 <option value="felsefe">🧠 Felsefe & Yapay Zeka (2 Kişi)</option>
                 <option value="acik_oturum">🗣️ Açık Oturum (3 Kişi)</option>
               </select>
